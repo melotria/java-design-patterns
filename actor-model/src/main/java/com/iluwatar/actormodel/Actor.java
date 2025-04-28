@@ -38,12 +38,49 @@ public abstract class Actor implements Runnable {
 
   // rather than being cached in a thread's local memory. To make it consistent to all Actors
 
+  @Setter @Getter private ActorSystem actorSystem;
+
+  /**
+   * Sends a message to this actor.
+   *
+   * @param message The message to send
+   */
   public void send(Message message) {
     mailbox.add(message); // Add message to queue
   }
 
+  /**
+   * Stops this actor.
+   */
   public void stop() {
     active = false; // Stop the actor loop
+  }
+
+  /**
+   * Creates a new child actor supervised by this actor.
+   * This implements the capability for actors to create new actors.
+   *
+   * @param childActor The actor to create as a child
+   * @return The ID of the created child actor
+   */
+  protected String createChildActor(Actor childActor) {
+    if (actorSystem == null) {
+      throw new IllegalStateException("Actor system not set");
+    }
+    childActor.setActorSystem(actorSystem);
+    return actorSystem.startChildActor(childActor, actorId);
+  }
+
+  /**
+   * Handles errors that occur during message processing.
+   * By default, it restarts the actor, but child classes can override this.
+   *
+   * @param error The error that occurred
+   */
+  protected void handleError(Throwable error) {
+    if (actorSystem != null) {
+      actorSystem.restartActor(actorId, error);
+    }
   }
 
   @Override
@@ -51,7 +88,11 @@ public abstract class Actor implements Runnable {
     while (active) {
       try {
         Message message = mailbox.take(); // Wait for a message
-        onReceive(message); // Process it
+        try {
+          onReceive(message); // Process it
+        } catch (Exception e) {
+          handleError(e); // Handle any errors
+        }
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
       }

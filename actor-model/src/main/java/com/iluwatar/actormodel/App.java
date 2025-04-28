@@ -44,21 +44,56 @@
  */
 package com.iluwatar.actormodel;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public class App {
+  /**
+   * Main method to demonstrate the Actor Model pattern.
+   * 
+   * @param args command line arguments (not used)
+   * @throws InterruptedException if thread is interrupted
+   */
   public static void main(String[] args) throws InterruptedException {
+    // Create the actor system
     ActorSystem system = new ActorSystem();
-    Actor srijan = new ExampleActor(system);
-    Actor ansh = new ExampleActor2(system);
 
-    system.startActor(srijan);
-    system.startActor(ansh);
-    ansh.send(new Message("Hello ansh", srijan.getActorId()));
-    srijan.send(new Message("Hello srijan!", ansh.getActorId()));
+    // Create and start parent actors
+    ExampleActor parent = new ExampleActor(system);
+    String parentId = system.startActor(parent);
+    LOGGER.info("Started parent actor with ID: {}", parentId);
 
-    Thread.sleep(1000); // Give time for messages to process
+    // Parent creates a child actor
+    String childId = parent.createChildExampleActor();
+    LOGGER.info("Parent created child actor with ID: {}", childId);
 
-    srijan.stop(); // Stop the actor gracefully
-    ansh.stop();
-    system.shutdown(); // Stop the actor system
+    // Get the child actor
+    ExampleActor2 child = (ExampleActor2) system.getActorById(childId);
+
+    // Basic message passing
+    child.send(new Message("Hello from parent", parent.getActorId()));
+    parent.send(new Message("Hello from child", child.getActorId()));
+
+    Thread.sleep(500); // Give time for messages to process
+
+    // Demonstrate supervision - send a message that will cause an error
+    LOGGER.info("Sending message that will cause an error to demonstrate supervision");
+    child.send(new Message("This will cause an error", parent.getActorId()));
+
+    Thread.sleep(1000); // Give time for error handling and supervision
+
+    // Create another actor directly through the system
+    Actor anotherActor = new ExampleActor2(system);
+    system.startActor(anotherActor);
+    anotherActor.send(new Message("Hello from the system", "system"));
+
+    Thread.sleep(500); // Give time for messages to process
+
+    // Graceful shutdown
+    LOGGER.info("Shutting down actors and system");
+    parent.stop();
+    child.stop();
+    anotherActor.stop();
+    system.shutdown();
   }
 }

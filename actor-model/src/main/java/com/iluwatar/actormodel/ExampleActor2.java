@@ -31,16 +31,26 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class ExampleActor2 extends Actor {
-  private final ActorSystem actorSystem;
   @Getter private final List<String> receivedMessages = new ArrayList<>();
 
   public ExampleActor2(ActorSystem actorSystem) {
-    this.actorSystem = actorSystem;
+    setActorSystem(actorSystem);
   }
 
   @Override
   protected void onReceive(Message message) {
     receivedMessages.add(message.getContent());
     LOGGER.info("[{}]Received : {}", getActorId(), message.getContent());
+
+    // Simulate an error occasionally to demonstrate supervision
+    if (message.getContent().contains("error")) {
+      throw new RuntimeException("Simulated error in ExampleActor2");
+    }
+  }
+
+  @Override
+  protected void handleError(Throwable error) {
+    LOGGER.error("[{}] Error occurred: {}", getActorId(), error.getMessage());
+    super.handleError(error);
   }
 }

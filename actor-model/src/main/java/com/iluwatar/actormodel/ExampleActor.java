@@ -31,23 +31,38 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class ExampleActor extends Actor {
-  private final ActorSystem actorSystem;
   @Getter private final List<String> receivedMessages = new ArrayList<>();
 
   public ExampleActor(ActorSystem actorSystem) {
-    this.actorSystem = actorSystem;
+    setActorSystem(actorSystem);
   }
-
-  // Logger log = Logger.getLogger(getClass().getName());
 
   @Override
   protected void onReceive(Message message) {
     LOGGER.info(
         "[{}]Received : {} from : [{}]", getActorId(), message.getContent(), message.getSenderId());
-    Actor sender = actorSystem.getActorById(message.getSenderId()); // sender actor id
+    receivedMessages.add(message.getContent());
+
+    // Check if this is a system message about a child actor failure
+    if (message.getSenderId().equals("system") && message.getContent().contains("failed")) {
+      LOGGER.info("[{}] Handling child failure: {}", getActorId(), message.getContent());
+      return;
+    }
+
+    Actor sender = getActorSystem().getActorById(message.getSenderId()); // sender actor id
     // Reply of the message
     if (sender != null && !message.getSenderId().equals(getActorId())) {
       sender.send(new Message("I got your message ", getActorId()));
     }
+  }
+
+  /**
+   * Creates a child actor that will be supervised by this actor.
+   * 
+   * @return The ID of the created child actor
+   */
+  public String createChildExampleActor() {
+    ExampleActor2 childActor = new ExampleActor2(getActorSystem());
+    return createChildActor(childActor);
   }
 }

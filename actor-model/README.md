@@ -65,21 +65,61 @@ public abstract class Actor implements Runnable {
     @Setter @Getter private String actorId;
     private final BlockingQueue<Message> mailbox = new LinkedBlockingQueue<>();
     private volatile boolean active = true; 
+    @Setter @Getter private ActorSystem actorSystem;
 
-
+    /**
+     * Sends a message to this actor.
+     */
     public void send(Message message) {
         mailbox.add(message); 
     }
 
+    /**
+     * Stops this actor.
+     */
     public void stop() {
         active = false; 
     }
 
-    @Override
-    public void run() {
-        
+    /**
+     * Creates a new child actor supervised by this actor.
+     * This implements the capability for actors to create new actors.
+     */
+    protected String createChildActor(Actor childActor) {
+        if (actorSystem == null) {
+            throw new IllegalStateException("Actor system not set");
+        }
+        childActor.setActorSystem(actorSystem);
+        return actorSystem.startChildActor(childActor, actorId);
     }
 
+    /**
+     * Handles errors that occur during message processing.
+     * By default, it restarts the actor, but child classes can override this.
+     */
+    protected void handleError(Throwable error) {
+        if (actorSystem != null) {
+            actorSystem.restartActor(actorId, error);
+        }
+    }
+
+    @Override
+    public void run() {
+        while (active) {
+            try {
+                Message message = mailbox.take(); // Wait for a message
+                try {
+                    onReceive(message); // Process it
+                } catch (Exception e) {
+                    handleError(e); // Handle any errors
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    // Child classes must define what to do with a message
     protected abstract void onReceive(Message message);
 }
 
@@ -102,16 +142,74 @@ public class Message {
 
 ```java
 public class ActorSystem {
-    public void startActor(Actor actor) {
+    private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final ConcurrentHashMap<String, Actor> actorRegister = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> actorHierarchy = new ConcurrentHashMap<>();
+    private final AtomicInteger idCounter = new AtomicInteger(0);
+
+    /**
+     * Starts an actor without a parent (top-level actor).
+     */
+    public String startActor(Actor actor) {
         String actorId = "actor-" + idCounter.incrementAndGet(); // Generate a new and unique ID
         actor.setActorId(actorId); // assign the actor it's ID
         actorRegister.put(actorId, actor); // Register and save the actor with it's ID
         executor.submit(actor); // Run the actor in a thread
+        return actorId;
     }
+
+    /**
+     * Starts an actor with a parent actor (child actor).
+     * The parent actor will supervise this child actor.
+     */
+    public String startChildActor(Actor actor, String parentId) {
+        String actorId = startActor(actor);
+        actorHierarchy.put(actorId, parentId); // Record parent-child relationship
+        return actorId;
+    }
+
+    /**
+     * Gets an actor by its ID.
+     */
     public Actor getActorById(String actorId) {
         return actorRegister.get(actorId); //  Find by Id
     }
 
+    /**
+     * Gets the parent actor of an actor.
+     */
+    public Actor getParentActor(String childId) {
+        String parentId = actorHierarchy.get(childId);
+        return parentId != null ? actorRegister.get(parentId) : null;
+    }
+
+    /**
+     * Restarts an actor that has failed.
+     * If the actor has a parent, the parent will be notified.
+     */
+    public void restartActor(String actorId, Throwable error) {
+        Actor actor = actorRegister.get(actorId);
+        if (actor != null) {
+            // Stop the current actor
+            actor.stop();
+
+            // Notify parent if exists
+            String parentId = actorHierarchy.get(actorId);
+            if (parentId != null) {
+                Actor parent = actorRegister.get(parentId);
+                if (parent != null) {
+                    parent.send(new Message("Child actor " + actorId + " failed: " + error.getMessage(), "system"));
+                }
+            }
+
+            // Restart the actor
+            executor.submit(actor);
+        }
+    }
+
+    /**
+     * Shuts down the actor system, stopping all actors.
+     */
     public void shutdown() {
         executor.shutdownNow(); // Stop all threads
     }
@@ -198,4 +296,3 @@ public class App {
 - *Reactive Design Patterns*, Roland Kuhn
 - *The Actor Model in 10 Minutes*, [InfoQ Article](https://www.infoq.com/articles/actor-model/)
 - [Akka Documentation](https://doc.akka.io/docs/akka/current/index.html)
-
